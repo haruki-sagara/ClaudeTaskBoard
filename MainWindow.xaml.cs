@@ -36,11 +36,83 @@ public partial class MainWindow : Window
         Scroller.MaxHeight = SystemParameters.WorkArea.Height * 0.7;
         Loaded += (_, _) => PlaceWindow();
         LocationChanged += (_, _) => { if (IsLoaded && Left > -10000) { _cfg.Left = Left; _cfg.Top = Top; } };
-        Closing += (_, _) => { if (!_snapshot) _cfg.Save(); };
+        Closing += OnClosing;
 
         _timer.Tick += async (_, _) => await PollAsync();
         _timer.Start();
         _ = PollAsync();
+    }
+
+    // ---- staying alive ----
+
+    // Set by App for the real board (not for --snapshot renders): only it reports a heartbeat.
+    public bool IsPrimary { get; init; }
+    readonly DispatcherTimer _beat = new() { Interval = TimeSpan.FromSeconds(5) };
+    bool _allowClose;
+
+    protected override void OnContentRendered(EventArgs e)
+    {
+        base.OnContentRendered(e);
+        if (!IsPrimary || _beat.IsEnabled) return;
+        _beat.Tick += (_, _) => Task.Run(Heartbeat.Beat);
+        _beat.Start();
+        Task.Run(Heartbeat.Beat);
+    }
+
+    // Windows is logging off / shutting down: close without asking.
+    public void AllowClose() => _allowClose = true;
+
+    // ✕ and Alt+F4 both ask first (in the board, no system dialog); an accidental close is the
+    // most likely way to "lose" the board, and it does not come back until relaunched.
+    void OnClosing(object? sender, System.ComponentModel.CancelEventArgs e)
+    {
+        if (_snapshot || _allowClose || !IsPrimary)
+        {
+            if (!_snapshot) _cfg.Save();
+            return;
+        }
+        e.Cancel = true;
+        _vm.ShowSettings = false;
+        _vm.ConfirmExit = true;
+        BringToFront();
+    }
+
+    void Close_Click(object sender, RoutedEventArgs e) => _vm.ConfirmExit = true;
+
+    void ConfirmExit_Click(object sender, RoutedEventArgs e)
+    {
+        App.ExitReason = "closed by user";
+        _beat.Stop();
+        Heartbeat.ClosedByUser(); // tells the hook not to relaunch it
+        _allowClose = true;
+        Close();
+    }
+
+    void CancelExit_Click(object sender, RoutedEventArgs e) => _vm.ConfirmExit = false;
+
+    // After sleep or a monitor/DPI change the saved spot may be off screen; bring it back and refresh.
+    public void OnResume()
+    {
+        EnsureOnScreen();
+        _ = PollAsync();
+    }
+
+    public void EnsureOnScreen()
+    {
+        if (_snapshot || Left < -10000) return;
+        Scroller.MaxHeight = SystemParameters.WorkArea.Height * 0.7;
+        if (OnScreen(Left, Top)) return;
+        var wa = SystemParameters.WorkArea;
+        Left = wa.Right - ActualWidth - 8;
+        Top = wa.Top + 60;
+        Log.Info("window was off screen; moved back");
+    }
+
+    static bool OnScreen(double left, double top)
+    {
+        double vl = SystemParameters.VirtualScreenLeft, vt = SystemParameters.VirtualScreenTop;
+        double vr = vl + SystemParameters.VirtualScreenWidth, vb = vt + SystemParameters.VirtualScreenHeight;
+        return left >= vl - 50 && left + 100 <= vr && top >= vt - 20 && top + 60 <= vb;
     }
 
     public void BringToFront()
@@ -82,12 +154,9 @@ public partial class MainWindow : Window
     {
         if (Left < -10000) return; // off-screen snapshot render
         var wa = SystemParameters.WorkArea;
-        double vl = SystemParameters.VirtualScreenLeft, vt = SystemParameters.VirtualScreenTop;
-        double vr = vl + SystemParameters.VirtualScreenWidth, vb = vt + SystemParameters.VirtualScreenHeight;
 
         // Restore the saved spot only if it is still on screen (monitors change).
-        if (!double.IsNaN(_cfg.Left) && !double.IsNaN(_cfg.Top) &&
-            _cfg.Left >= vl - 50 && _cfg.Left + 100 <= vr && _cfg.Top >= vt - 20 && _cfg.Top + 60 <= vb)
+        if (!double.IsNaN(_cfg.Left) && !double.IsNaN(_cfg.Top) && OnScreen(_cfg.Left, _cfg.Top))
         {
             Left = _cfg.Left;
             Top = _cfg.Top;
@@ -108,7 +177,7 @@ public partial class MainWindow : Window
             var snaps = await Task.Run(_store.Poll);
             Apply(snaps);
         }
-        catch { /* keep the board alive; the next tick retries */ }
+        catch (Exception ex) { Log.Error("poll", ex); /* keep the board alive; the next tick retries */ }
         finally { _polling = false; }
     }
 
@@ -266,7 +335,6 @@ public partial class MainWindow : Window
         catch { return false; }
     }
 
-    void Close_Click(object sender, RoutedEventArgs e) => Close();
 
     static T? FindParent<T>(DependencyObject d) where T : DependencyObject
     {

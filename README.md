@@ -57,9 +57,18 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 
 1. `dist\ClaudeTaskBoard.exe` を `%LOCALAPPDATA%\ClaudeTaskBoard\` にコピー
 2. `hooks\hook.js` を `~/.claude/taskboard/hook.js` にコピーし、`~/.claude/settings.json` に hook を登録（既存の hook は残す。初回のみ `settings.json.bak-taskboard` にバックアップ。再実行しても重複しない）
-3. 自動起動が有効なら、その登録先をインストール先の exe に更新して起動
+3. 自動起動が有効なら、その登録先をインストール先の exe に更新
+4. デスクトップにショートカット「Claude Task Board」を作成して起動
 
-アンインストールは `.\uninstall.ps1`（自分の hook だけを外し、アプリ・自動起動・インストール先を削除）。
+アンインストールは `.\uninstall.ps1`（自分の hook だけを外し、アプリ・自動起動・インストール先・ショートカットを削除）。
+
+## 安定性・トラブル時の調べ方
+
+- **終了は確認つき**: ✕ と Alt+F4 はボード内で確認してから終了する（Windows のログオフ・シャットダウン時は確認しない）。
+- **落ちても戻る**: ボードは 5 秒ごとに `~/.claude/taskboard/board.json` に生存の印を書く。印が 30 秒以上途絶えていれば、次のセッション開始・プロンプト送信時に hook がボードを起動し直す（explorer 経由なので、Claude デスクトップアプリの中ではなく通常のアプリとして起動する）。ユーザーが自分で終了した場合は起動しない（次に手動で起動すると解除）。
+- **画面外対策**: スリープ復帰や画面構成の変更で画面外に出たら、画面内に戻す。
+- **例外**: UI スレッドの例外は記録して動作を続ける（1 分に 20 回を超えたら終了し、上記の仕組みで再起動）。
+- **ログ**: `~/.claude/taskboard/logs/board.log`（1MB で `board.log.1` にローテート）。起動・終了とその理由・例外・スリープ／復帰を記録する。`start` の後に `exit` が無ければ、強制終了またはネイティブクラッシュ（その場合は Windows のイベントビューアー「アプリケーション」も確認）。
 
 ## データの取り方
 

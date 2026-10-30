@@ -11,10 +11,35 @@ public partial class App : Application
 
     Mutex? _mutex;
     EventWaitHandle? _showEvent;
+    bool _primary; // this is the running board (not a second launch handing over, not a test mode)
+
+    // UI-thread exceptions are logged and survived; a burst of them means something is truly broken,
+    // so after that many in a minute the board is let go (and the hook relaunches it on the next prompt).
+    const int ErrorBurst = 20;
+    readonly Queue<DateTime> _uiErrors = new();
+
+    // Why the process is ending, for the exit log line.
+    public static string ExitReason { get; set; } = "unknown";
 
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+
+        DispatcherUnhandledException += (_, a) =>
+        {
+            Log.Error("ui", a.Exception);
+            var now = DateTime.UtcNow;
+            _uiErrors.Enqueue(now);
+            while (_uiErrors.Count > 0 && now - _uiErrors.Peek() > TimeSpan.FromMinutes(1)) _uiErrors.Dequeue();
+            a.Handled = _uiErrors.Count < ErrorBurst;
+            if (!a.Handled) ExitReason = "crash: repeated UI errors";
+        };
+        AppDomain.CurrentDomain.UnhandledException += (_, a) =>
+        {
+            ExitReason = "crash: unhandled exception";
+            Log.Error(a.IsTerminating ? "fatal" : "background", a.ExceptionObject as Exception);
+        };
+        TaskScheduler.UnobservedTaskException += (_, a) => { Log.Error("task", a.Exception); a.SetObserved(); };
 
         if (e.Args.Contains("--selftest"))
         {
@@ -54,26 +79,46 @@ public partial class App : Application
             return;
         }
 
+        _primary = true;
+        Log.Info($"start v{typeof(App).Assembly.GetName().Version} exe={Environment.ProcessPath}");
+        SessionEnding += (_, a) =>
+        {
+            ExitReason = $"windows {a.ReasonSessionEnding}";
+            (MainWindow as MainWindow)?.AllowClose();
+        };
+        SystemEvents.PowerModeChanged += (_, a) =>
+        {
+            Log.Info($"power {a.Mode}");
+            if (a.Mode == PowerModes.Resume) Dispatcher.BeginInvoke(() => (MainWindow as MainWindow)?.OnResume());
+        };
+        SystemEvents.DisplaySettingsChanged += (_, _) =>
+            Dispatcher.BeginInvoke(() => (MainWindow as MainWindow)?.EnsureOnScreen());
+
         ApplyTheme();
         SystemEvents.UserPreferenceChanged += (_, a) =>
         {
             if (a.Category == UserPreferenceCategory.General) Dispatcher.Invoke(() => ApplyTheme());
         };
 
-        var win = new MainWindow();
+        var win = new MainWindow { IsPrimary = true };
         MainWindow = win;
         win.Show();
 
         var waiter = new Thread(() =>
         {
             while (_showEvent.WaitOne())
-                Dispatcher.Invoke(win.BringToFront);
+            {
+                // An exception on this background thread would kill the process (e.g. during shutdown).
+                try { Dispatcher.Invoke(win.BringToFront); }
+                catch (Exception ex) { Log.Error("show-event", ex); }
+            }
         }) { IsBackground = true };
         waiter.Start();
     }
 
     protected override void OnExit(ExitEventArgs e)
     {
+        if (_primary) Log.Info($"exit code={e.ApplicationExitCode} reason={ExitReason}");
         _mutex?.Dispose();
         base.OnExit(e);
     }

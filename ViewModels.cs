@@ -265,6 +265,9 @@ public sealed class BoardVM : Observable
     public bool IsEmpty { get => _isEmpty; set => Set(ref _isEmpty, value); }
     public bool ShowSettings { get => _showSettings; set => Set(ref _showSettings, value); }
 
+    bool _confirmExit;
+    public bool ConfirmExit { get => _confirmExit; set => Set(ref _confirmExit, value); }
+
     string _toastText = "";
     bool _showToast;
     public string ToastText { get => _toastText; set => Set(ref _toastText, value); }

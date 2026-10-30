@@ -45,7 +45,31 @@ setTimeout(run, 1500); // hooks always pipe stdin, but never hang the session
 function run() {
   if (done) return; done = true;
   try { main(); } catch {}
+  if (event === "start" || event === "prompt") { try { ensureBoard(); } catch {} }
   process.exit(0);
+}
+
+// Self-healing: if the board's heartbeat (board.json, rewritten every 5 s) has gone stale, it crashed or
+// was killed — start it again. Not when the user closed it on purpose (closedByUser). Only on session
+// start / prompt, so a busy tool loop pays nothing. Skipped in isolated test homes (TASKBOARD_HOME).
+function ensureBoard() {
+  if (process.platform !== "win32" || process.env.TASKBOARD_HOME) return;
+  const hbFile = path.join(home, "board.json");
+  let hb = {};
+  try { hb = JSON.parse(fs.readFileSync(hbFile, "utf8")); } catch {}
+  if (hb.closedByUser) return;
+  const now = Math.floor(Date.now() / 1000);
+  if (now - (hb.ts || 0) < 30) return; // alive (or another hook just launched it)
+
+  const fallback = path.join(process.env.LOCALAPPDATA || "", "ClaudeTaskBoard", "ClaudeTaskBoard.exe");
+  const exe = hb.exe && fs.existsSync(hb.exe) ? hb.exe : fallback;
+  if (!fs.existsSync(exe)) return;
+
+  // Claim the launch first so hooks firing in parallel don't all start one.
+  fs.writeFileSync(hbFile, JSON.stringify({ ...hb, ts: now, launching: true }));
+  // Through explorer.exe: the board then runs as a normal desktop app, outside the app container the
+  // Claude desktop app runs its hooks in (where it would see a virtualized registry and die with it).
+  require("child_process").spawn("explorer.exe", [exe], { detached: true, stdio: "ignore" }).unref();
 }
 
 function main() {

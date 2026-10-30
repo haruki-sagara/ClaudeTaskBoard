@@ -1,4 +1,5 @@
-# Install ClaudeTaskBoard: copy the exe to LocalAppData, register its Claude Code hook, and launch it.
+# Install ClaudeTaskBoard: copy the exe to LocalAppData, register its Claude Code hook, create a desktop
+# shortcut, and launch it.
 # Standalone — needs nothing from claude-status-tray. Re-runnable.
 $ErrorActionPreference = 'Stop'
 $root = $PSScriptRoot
@@ -28,5 +29,18 @@ if (Get-ItemProperty -Path $run -Name 'ClaudeTaskBoard' -ErrorAction SilentlyCon
     Set-ItemProperty -Path $run -Name 'ClaudeTaskBoard' -Value "`"$installed`""
 }
 
+# 4. Desktop shortcut (re-created each run so it always points at the installed copy).
+$lnk = Join-Path ([Environment]::GetFolderPath('Desktop')) 'Claude Task Board.lnk'
+$sc = (New-Object -ComObject WScript.Shell).CreateShortcut($lnk)
+$sc.TargetPath = $installed
+$sc.WorkingDirectory = $dest
+$sc.IconLocation = "$installed,0"
+$sc.Description = 'Claude Code のセッション・タスク・確認をフロート表示'
+$sc.Save()
+
+# A fresh install is a deliberate start: clear an earlier "closed by user" so self-healing is back on.
+$hb = Join-Path $env:USERPROFILE '.claude\taskboard\board.json'
+if (Test-Path $hb) { Remove-Item $hb -Force }
+
 Start-Process $installed
-Write-Host "Installed to $installed and launched. Hook registered."
+Write-Host "Installed to $installed and launched. Hook registered. Shortcut: $lnk"

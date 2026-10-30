@@ -265,6 +265,49 @@
                 </StackPanel>
             </Grid>
 
+            <!-- Exit confirmation (✕ and Alt+F4), inline instead of a system dialog. -->
+            <Border CornerRadius="8" Padding="10,8" Margin="0,0,0,6" Background="{DynamicResource Card}"
+                    local:Anim.Show="{Binding ConfirmExit}" Visibility="Collapsed">
+                <Border.Resources>
+                    <Style x:Key="TextButton" TargetType="Button">
+                        <Setter Property="Cursor" Value="Hand" />
+                        <Setter Property="Focusable" Value="False" />
+                        <Setter Property="Margin" Value="6,0,0,0" />
+                        <Setter Property="Background" Value="{DynamicResource CardHover}" />
+                        <Setter Property="Foreground" Value="{DynamicResource Fg}" />
+                        <Setter Property="Template">
+                            <Setter.Value>
+                                <ControlTemplate TargetType="Button">
+                                    <Border x:Name="Bd" CornerRadius="5" Padding="12,3" Background="{TemplateBinding Background}">
+                                        <TextBlock Text="{TemplateBinding Content}" FontSize="11.5" Foreground="{TemplateBinding Foreground}" />
+                                    </Border>
+                                    <ControlTemplate.Triggers>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter TargetName="Bd" Property="Opacity" Value="0.85" />
+                                        </Trigger>
+                                    </ControlTemplate.Triggers>
+                                </ControlTemplate>
+                            </Setter.Value>
+                        </Setter>
+                    </Style>
+                </Border.Resources>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock Text="ボードを終了しますか？" FontWeight="SemiBold" />
+                        <TextBlock Text="再開はデスクトップのショートカットから" FontSize="10.5" Foreground="{DynamicResource FgSub}" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                        <Button Style="{StaticResource TextButton}" Content="キャンセル" Click="CancelExit_Click" />
+                        <Button Style="{StaticResource TextButton}" Content="終了" Click="ConfirmExit_Click"
+                                Background="{DynamicResource Accent}" Foreground="#FFFFFF" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+
             <!-- Inline settings panel (no popup). -->
             <Border CornerRadius="8" Padding="10,8" Margin="0,0,0,6" Background="{DynamicResource Card}"
                     local:Anim.Show="{Binding ShowSettings}" Visibility="Collapsed">
