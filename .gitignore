@@ -2,3 +2,10 @@ bin/
 obj/
 dist/
 temp/
+
+# Credentials: the app reads them from ~/.claude and never copies them here; this is the safety net.
+.credentials.json
+*.credentials.json
+*.token
+.env
+.env.*

@@ -38,6 +38,9 @@ $sc.IconLocation = "$installed,0"
 $sc.Description = 'Claude Code のセッション・タスク・確認をフロート表示'
 $sc.Save()
 
+# 5. Explorer right-click menu: "Claude Code で開く" (opens the folder in the desktop app).
+& (Join-Path $root 'tools\context-menu.ps1')
+
 # A fresh install is a deliberate start: clear an earlier "closed by user" so self-healing is back on.
 $hb = Join-Path $env:USERPROFILE '.claude\taskboard\board.json'
 if (Test-Path $hb) { Remove-Item $hb -Force }

@@ -99,6 +99,10 @@ public sealed class SessionVM : Observable
     public string NoticeText { get => _noticeText; private set => Set(ref _noticeText, value); }
     public string NoticeKind { get => _noticeKind; private set => Set(ref _noticeKind, value); }
     public bool HasNotice => NoticeKind.Length > 0;
+    // At the narrowest width there is no room for the band; the dot's color and the header's count remain.
+    bool _tiny;
+    public bool Tiny { get => _tiny; set { if (Set(ref _tiny, value)) Raise(nameof(ShowNotice)); } }
+    public bool ShowNotice => HasNotice && !Tiny;
     public bool NoticeNeedsAction => NoticeKind is "permission" or "question" or "plan" or "ask";
     public Brush NoticeBrush => NoticeNeedsAction ? PermissionBrush : InfoBrush;
     // Changes whenever a different notice arrives — the board toasts on that.
@@ -112,7 +116,7 @@ public sealed class SessionVM : Observable
         NoticeKind = n?.Kind ?? "";
         NoticeTitle = n?.Title ?? "";
         NoticeText = n?.Text ?? "";
-        foreach (var p in new[] { nameof(HasNotice), nameof(NoticeNeedsAction), nameof(NoticeBrush), nameof(IsResting), nameof(Priority) })
+        foreach (var p in new[] { nameof(HasNotice), nameof(ShowNotice), nameof(NoticeNeedsAction), nameof(NoticeBrush), nameof(IsResting), nameof(Priority) })
             Raise(p);
     }
 
@@ -127,6 +131,9 @@ public sealed class SessionVM : Observable
     // Where the session runs, for click-to-focus.
     public string Entrypoint { get; private set; } = "";
     public int Pid { get; private set; }
+
+    // When the session last did something; a card put away with ✕ comes back once this moves on.
+    public long Ts => _ts;
 
     public bool IsExpanded
     {
@@ -219,6 +226,23 @@ public sealed class SessionVM : Observable
     static Brush Freeze(SolidColorBrush b) { b.Freeze(); return b; }
 }
 
+// Cards put away with ✕ (duplicates, sessions not worth watching): hidden until the session does
+// something new, then listed again. Kept in memory only — a restarted board shows everything.
+public sealed class DismissList
+{
+    readonly Dictionary<string, long> _at = new();
+
+    public void Add(string id, long ts) => _at[id] = ts;
+
+    public bool Hides(string id, long ts)
+    {
+        if (!_at.TryGetValue(id, out long at)) return false;
+        if (ts <= at) return true;
+        _at.Remove(id); // it moved on: back for good, until put away again
+        return false;
+    }
+}
+
 public sealed class Settings
 {
     public double Left { get; set; } = double.NaN;
@@ -227,6 +251,12 @@ public sealed class Settings
     public bool Compact { get; set; }
     public bool Topmost { get; set; } = true;
     public bool HideResting { get; set; }
+    public double Width { get; set; } = MainWindow.DefaultBoardWidth;
+    // NaN = fit the content (up to 70% of the screen); a number = the height dragged to.
+    public double Height { get; set; } = double.NaN;
+    public bool HeaderOnly { get; set; }
+    // Arranged windows narrower than the area in all line up at its right edge instead of the left.
+    public bool ArrangeRight { get; set; }
 
     public static readonly string Path = System.IO.Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".claude", "taskboard", "settings.json");
@@ -272,4 +302,58 @@ public sealed class BoardVM : Observable
     bool _showToast;
     public string ToastText { get => _toastText; set => Set(ref _toastText, value); }
     public bool ShowToast { get => _showToast; set => Set(ref _showToast, value); }
+
+    // Header-only view: everything below the header is put away.
+    bool _headerOnly, _slim, _tiny;
+    public bool HeaderOnly { get => _headerOnly; set { if (Set(ref _headerOnly, value)) Raise(nameof(ShowBody)); } }
+    public bool ShowBody => !HeaderOnly;
+    // Width steps: Slim moves the header buttons to their own row; Tiny leaves one line per session.
+    public bool Slim { get => _slim; set => Set(ref _slim, value); }
+    public bool Tiny { get => _tiny; set => Set(ref _tiny, value); }
+
+    // ---- weekly usage ----
+    static readonly Brush UsageLow = Frozen(0x3F, 0xB2, 0x7F);
+    static readonly Brush UsageHigh = Frozen(0xE8, 0xB9, 0x31);
+    static readonly Brush UsageFull = Frozen(0xE5, 0x53, 0x4B);
+    static readonly System.Globalization.CultureInfo Ja = new("ja-JP");
+
+    string _usageText = "取得中…", _usageDetail = "";
+    double _usageFraction;
+    bool _hasUsage, _showLogin;
+    Brush _usageBrush = UsageLow;
+    // Only when logging in again is what fixes it, not for a passing network or server failure.
+    public bool ShowLogin { get => _showLogin; private set => Set(ref _showLogin, value); }
+    public string UsageText { get => _usageText; private set => Set(ref _usageText, value); }
+    public string UsageDetail { get => _usageDetail; private set => Set(ref _usageDetail, value); }
+    public double UsageFraction { get => _usageFraction; private set => Set(ref _usageFraction, value); }
+    public bool HasUsage { get => _hasUsage; private set => Set(ref _hasUsage, value); }
+    public Brush UsageBrush { get => _usageBrush; private set => Set(ref _usageBrush, value); }
+
+    public void ApplyUsage(UsageResult r)
+    {
+        ShowLogin = r.Error is UsageClient.ErrRelogin or UsageClient.ErrExpired or UsageClient.ErrNoLogin;
+        // Unreadable means no number at all: a stale percentage would look like the real one.
+        if (r.PercentUsed is not int used)
+        {
+            HasUsage = false;
+            UsageFraction = 0;
+            UsageText = "取得不可";
+            UsageDetail = r.Error;
+            return;
+        }
+        HasUsage = true;
+        UsageFraction = used / 100.0;
+        UsageBrush = used >= 90 ? UsageFull : used >= 70 ? UsageHigh : UsageLow;
+        UsageText = $"{used}% 使用";
+        // To the nearest minute: the server's time jitters around the hour, and 22:59 would read as a different time.
+        string reset = r.ResetsAt is { } at ? $" · {at.AddSeconds(30).ToLocalTime().ToString("M/d(ddd) HH:mm", Ja)} にリセット" : "";
+        UsageDetail = $"残り {100 - used}%{reset}";
+    }
+
+    static Brush Frozen(byte r, byte g, byte b)
+    {
+        var brush = new SolidColorBrush(Color.FromRgb(r, g, b));
+        brush.Freeze();
+        return brush;
+    }
 }

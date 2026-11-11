@@ -28,6 +28,31 @@ public static class WindowFocus
         return FocusTerminal(pid) ? FocusResult.Terminal : FocusResult.NotFound;
     }
 
+    // The window that belongs to this session alone, to move it around: its own desktop-app window or its
+    // terminal. Zero for a session living in the desktop app's main window, which is shared by all of them.
+    public static IntPtr OwnWindow(string title, string entrypoint, int pid)
+    {
+        if (entrypoint != "cli")
+        {
+            var child = DesktopWindows().FirstOrDefault(w => w.Title.Length > 0 && w.Title == title && w.Title != DesktopMainTitle);
+            if (child.Handle != IntPtr.Zero) return child.Handle;
+            if (entrypoint.Length > 0) return IntPtr.Zero;
+        }
+        return TerminalWindow(pid);
+    }
+
+    // A window of the Claude desktop app (as opposed to a terminal).
+    public static bool IsDesktopAppWindow(IntPtr h)
+    {
+        GetWindowThreadProcessId(h, out uint pid);
+        try
+        {
+            using var p = Process.GetProcessById((int)pid);
+            return p.ProcessName.Equals("claude", StringComparison.OrdinalIgnoreCase);
+        }
+        catch { return false; }
+    }
+
     // Titles of sessions popped out into their own desktop-app window (= their session titles).
     public static HashSet<string> ChildWindowTitles() =>
         DesktopWindows().Select(w => w.Title).Where(t => t != DesktopMainTitle).ToHashSet(StringComparer.Ordinal);
@@ -59,20 +84,28 @@ public static class WindowFocus
 
     static bool FocusTerminal(int pid)
     {
+        var h = TerminalWindow(pid);
+        if (h == IntPtr.Zero) return false;
+        Raise(h);
+        return true;
+    }
+
+    static IntPtr TerminalWindow(int pid)
+    {
         try
         {
             for (int i = 0; i < 8 && pid > 0; i++)
             {
                 using var p = Process.GetProcessById(pid);
-                if (p.MainWindowHandle != IntPtr.Zero) { Raise(p.MainWindowHandle); return true; }
+                if (p.MainWindowHandle != IntPtr.Zero) return p.MainWindowHandle;
                 pid = ParentPid(p);
             }
         }
         catch { /* process gone: on Windows the recorded pid is often a transient shell */ }
-        return false;
+        return IntPtr.Zero;
     }
 
-    static void Raise(IntPtr h)
+    public static void Raise(IntPtr h)
     {
         if (IsIconic(h)) ShowWindow(h, SW_RESTORE);
         SetForegroundWindow(h);

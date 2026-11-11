@@ -47,6 +47,16 @@ public partial class App : Application
             return;
         }
 
+        // --open-folder <path>: from the Explorer right-click menu. Hands over to the desktop app and exits.
+        int openAt = Array.IndexOf(e.Args, "--open-folder");
+        if (openAt >= 0 && openAt + 1 < e.Args.Length)
+        {
+            try { FolderLink.Open(e.Args[openAt + 1]); }
+            catch (Exception ex) { Log.Error("open-folder", ex); }
+            Shutdown();
+            return;
+        }
+
         // --snapshot <png>: render the board off-screen from live data and exit (visual check / bug reports).
         int snapAt = Array.IndexOf(e.Args, "--snapshot");
         if (snapAt >= 0 && snapAt + 1 < e.Args.Length)
@@ -61,6 +71,16 @@ public partial class App : Application
                 t.Stop();
                 if (expand) shot.ExpandAll();
                 if (e.Args.Contains("--settings")) shot.OpenSettings();
+                if (e.Args.Contains("--header-only")) shot.SetHeaderOnly();
+                int widthAt = Array.IndexOf(e.Args, "--width");
+                if (widthAt >= 0 && widthAt + 1 < e.Args.Length && double.TryParse(e.Args[widthAt + 1], out double width))
+                    shot.SetBoardWidth(width);
+                int heightAt = Array.IndexOf(e.Args, "--height");
+                if (heightAt >= 0 && heightAt + 1 < e.Args.Length && double.TryParse(e.Args[heightAt + 1], out double height))
+                    shot.SetBoardHeight(height);
+                int usageAt = Array.IndexOf(e.Args, "--usage-percent"); // demo value: no credentials involved
+                if (usageAt >= 0 && usageAt + 1 < e.Args.Length && int.TryParse(e.Args[usageAt + 1], out int pct))
+                    shot.ShowUsage(new UsageResult(pct, DateTimeOffset.Now.AddDays(2), "", TimeSpan.Zero));
                 await Task.Delay(400); // let enter animations finish
                 shot.SaveSnapshot(e.Args[snapAt + 1]);
                 Shutdown();
@@ -80,6 +100,7 @@ public partial class App : Application
         }
 
         _primary = true;
+        UsageClient.AllowRefresh = true;
         Log.Info($"start v{typeof(App).Assembly.GetName().Version} exe={Environment.ProcessPath}");
         SessionEnding += (_, a) =>
         {

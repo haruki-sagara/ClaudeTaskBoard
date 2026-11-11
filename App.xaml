@@ -23,6 +23,22 @@
             <Setter Property="FontSize" Value="12" />
         </Style>
 
+        <!-- Hover hint, in the board's own look. -->
+        <Style TargetType="ToolTip">
+            <Setter Property="HasDropShadow" Value="False" />
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToolTip">
+                        <Border CornerRadius="6" Padding="8,5" MaxWidth="240" Background="{DynamicResource Bg}"
+                                BorderBrush="{DynamicResource Border}" BorderThickness="1">
+                            <TextBlock FontSize="11" TextWrapping="Wrap"
+                                       Text="{Binding Content, RelativeSource={RelativeSource TemplatedParent}}" />
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <!-- Square icon button used in the header. -->
         <Style x:Key="IconButton" TargetType="ButtonBase">
             <Setter Property="Width" Value="26" />
